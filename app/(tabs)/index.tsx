@@ -1,5 +1,7 @@
 import { useAuthContext } from '@/contexts/AuthContext';
-import React, { useState } from 'react';
+import { useOutboxContext } from '@/contexts/OutboxContext';
+import { useRouter } from 'expo-router';
+import React, { useMemo } from 'react';
 import {
   SafeAreaView,
   ScrollView,
@@ -8,7 +10,11 @@ import {
   View,
 } from 'react-native';
 import { RecentItem, RecordingCard, StatsCard } from '../../components/home';
-import { StatusBar } from '../../components/ui';
+import { AudioCard } from '../../components/audio';
+import { useOutboxPlayer } from '../../hooks/useOutboxPlayer';
+import { useAudioActions } from '../../hooks/useAudioActions';
+import { AudioService } from '../../services/audioService';
+
 import { Colors, Spacing, Typography } from '../../constants';
 
 interface RecentRecord {
@@ -22,7 +28,20 @@ interface RecentRecord {
 
 export default function HomeScreen() {
   const { user } = useAuthContext();
-  const [recentRecords, setRecentRecords] = useState<RecentRecord[]>([
+  const { recordings, deleteRecording } = useOutboxContext();
+  const { isPlaying, playRecording, pauseRecording, stopAllRecordings, currentTime } = useOutboxPlayer(recordings);
+  const router = useRouter();
+  
+  // Use the audio actions hook
+  const {
+    selectedItemId,
+    handleToggleSelection,
+    handleShare,
+    handleSend,
+    handleDelete,
+  } = useAudioActions(recordings, deleteRecording, stopAllRecordings);
+
+  const [recentRecords, setRecentRecords] = React.useState<RecentRecord[]>([
     {
       id: '1',
       patientName: 'Patient Name',
@@ -41,14 +60,18 @@ export default function HomeScreen() {
     },
   ]);
 
+  // Get the most recent recording using the service
+  const mostRecentRecording = useMemo(() => {
+    return AudioService.getMostRecentRecording(recordings);
+  }, [recordings]);
+
   const handleStatsPress = (type: 'pending' | 'sent') => {
     // Handle stats navigation or action
     // TODO: Implement navigation to stats screen
   };
 
   const handleRecordPress = () => {
-    // Handle navigation to record screen
-    // TODO: Implement navigation to record screen
+    router.push('./record');
   };
 
   const handleTogglePlay = (id: string) => {
@@ -61,10 +84,22 @@ export default function HomeScreen() {
     );
   };
 
+  // Audio card handlers
+  const handleAudioPlayPause = async (recordingId: string) => {
+    try {
+      if (isPlaying(recordingId)) {
+        await pauseRecording(recordingId);
+      } else {
+        await stopAllRecordings();
+        await playRecording(recordingId);
+      }
+    } catch (error) {
+      console.error('Error handling play/pause:', error);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
-      
-      
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.header}>
           <Text style={styles.welcome}>Welcome</Text>
@@ -85,11 +120,33 @@ export default function HomeScreen() {
           />
         </View>
         
-
         <RecordingCard onPress={handleRecordPress} />
 
         <View style={styles.recentsSection}>
           <Text style={styles.recentsTitle}>Recents</Text>
+          
+          {/* Show most recent audio recording if available */}
+          {mostRecentRecording && (
+            <AudioCard
+              id={mostRecentRecording.id}
+              title={mostRecentRecording.title || mostRecentRecording.filename}
+              sender="Dr. Rajeev"
+              date={`${mostRecentRecording.dateRecorded} | ${mostRecentRecording.timeRecorded}`}
+              duration={AudioService.formatDuration(mostRecentRecording.duration)}
+              isPlaying={isPlaying(mostRecentRecording.id)}
+              isSelected={selectedItemId === mostRecentRecording.id}
+              waveformData={mostRecentRecording.waveformData}
+              currentTime={currentTime}
+              onPlayPause={() => handleAudioPlayPause(mostRecentRecording.id)}
+              onToggleSelection={() => handleToggleSelection(mostRecentRecording.id)}
+              showActions={true}
+              onShare={() => handleShare(mostRecentRecording.id)}
+              onSend={() => handleSend(mostRecentRecording.id)}
+              onDelete={() => handleDelete(mostRecentRecording.id)}
+            />
+          )}
+          
+          {/* Show old mock data for other recent items */}
           {recentRecords.map(record => (
             <RecentItem
               key={record.id}

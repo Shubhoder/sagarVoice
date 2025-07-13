@@ -1,187 +1,158 @@
+import React from "react";
+import { StatusBar, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import * as ImagePicker from "expo-image-picker";
-import { useState } from "react";
+import { useRouter } from "expo-router";
+
+// Import modular components
 import {
-  Alert,
-  Modal,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
+  PlaybackWaveform,
+  RecordingHeader,
+  CallDetectionAlert,
+  RecordingInfoCard,
+  ActionButtons,
+  UploadModal,
+} from "../../components/audio";
+
+// Import hooks
+import { useRecordingPlayback, usePhotoUpload } from "../../hooks";
+
+// Import existing components
 import FloatingTabs from "../floatingTabs";
 
 const AudioRecordingScreen = () => {
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingTime, setRecordingTime] = useState("00:03:20");
-  const [playbackTime, setPlaybackTime] = useState("00:02:20");
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [uploadModalVisible, setUploadModalVisible] = useState(false);
-  const [selectedPhotos, setSelectedPhotos] = useState<string[]>([]);
+  const router = useRouter();
+  
+  // Use custom hooks for logic
+  const {
+    currentTime,
+    playerStatus,
+    callDetected,
+    currentRecording,
+    formatTime,
+    handlePlayPause,
+    handleSeek,
+    handleResumeRecording,
+    handleDiscard,
+    handleSend,
+    handleDraft,
+    handleBackToRecord,
+    getTotalDuration,
+  } = useRecordingPlayback();
 
-  const generateWaveform = () => {
-    const heights = [15, 30, 10, 35, 20, 40, 15, 30, 10, 35, 20, 40, 15, 20];
-    return heights.map((height, i) => (
-      <View
-        key={i}
-        style={{
-          width: 5,
-          height,
-          backgroundColor: "#00AEEF",
-          marginHorizontal: 2,
-          borderRadius: 3,
-        }}
-      />
-    ));
-  };
+  const {
+    uploadModalVisible,
+    handleTakePhoto,
+    handleChoosePhoto,
+    openUploadModal,
+    closeUploadModal,
+  } = usePhotoUpload();
 
-  const handleTakePhoto = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permission required", "Camera permission is needed.");
-      return;
+  // Extract waveform heights from live recorded data
+  const waveformHeights = React.useMemo(() => {
+    if (currentRecording.liveWaveformSamples && currentRecording.liveWaveformSamples.length > 0) {
+      return currentRecording.liveWaveformSamples;
     }
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 1,
-    });
-    if (!result.canceled) {
-      setSelectedPhotos([...selectedPhotos, result.assets[0].uri]);
-    }
-  };
+    return currentRecording.waveformData.flatMap(data => data.samples);
+  }, [currentRecording.liveWaveformSamples, currentRecording.waveformData]);
 
-  const handleChoosePhoto = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permission required", "Gallery permission is needed.");
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 1,
-    });
-    if (!result.canceled) {
-      const newPhotos = result.assets.map((a) => a.uri);
-      setSelectedPhotos([...selectedPhotos, ...newPhotos]);
-    }
-  };
+  if (!currentRecording.uri) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.noRecordingText}>No recording available</Text>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => router.push('../(tabs)/record')}
+        >
+          <Text style={styles.backButtonText}>Go Back to Record</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+      
       {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.title}>MHH000042</Text>
-        <Ionicons name="person-add-outline" size={22} color="#00AEEF" />
-      </View>
-      {/* Waveform */}
-      <View style={styles.waveform}>{generateWaveform()}</View>
-      {/* Playback Time */}
+      <RecordingHeader
+        title={currentRecording.fromCallDetection ? "Auto-Saved Recording" : "Recording Playback"}
+      />
+
+      {/* Call Detection Alert */}
+      <CallDetectionAlert
+        visible={callDetected && currentRecording.fromCallDetection}
+        onBackToRecord={handleBackToRecord}
+      />
+
+      {/* Recording Info */}
+      {currentRecording.fromCallDetection && (
+        <RecordingInfoCard
+          savedFilePath={currentRecording.savedFilePath}
+          duration={getTotalDuration()}
+          formatTime={formatTime}
+        />
+      )}
+
+      {/* Playback Waveform */}
+      <PlaybackWaveform
+        waveformData={waveformHeights}
+        isPlaying={playerStatus.playing}
+        currentTime={currentTime}
+        duration={getTotalDuration()}
+        onSeek={handleSeek}
+      />
+
+      {/* Playback Timer */}
       <Text style={styles.playbackLabel}>
-        Playback Time: <Text style={styles.playbackTime}>{playbackTime}</Text>
+        {formatTime(currentTime)} / {formatTime(getTotalDuration())}
       </Text>
-      {/* Play button */}
+
+      {/* Play/Pause Button */}
       <TouchableOpacity
         style={styles.playButton}
-        onPress={() => setIsPlaying(!isPlaying)}
+        onPress={handlePlayPause}
       >
-        <Ionicons name={isPlaying ? "pause" : "play"} size={30} color="#fff" />
+        <Ionicons 
+          name={playerStatus.playing ? "pause" : "play"} 
+          size={30} 
+          color="#fff" 
+        />
       </TouchableOpacity>
-      {/* Insert / Over toggle */}
-      <View style={styles.toggleWrapper}>
-        <Text style={styles.toggleLabel}>Insert</Text>
-        <View style={styles.toggleTrack}>
-          <View style={styles.toggleThumb} />
-        </View>
-        <Text style={styles.toggleLabel}>Over</Text>
-      </View>
-      {/* Recording Time */}
-      <Text style={styles.recordingTime}>{recordingTime}</Text>
-      <Text style={styles.status}>Recording Paused</Text>
-      {/* Resume */}
-      <TouchableOpacity>
-        <Text style={styles.resumeText}>Click Here to Resume Recording</Text>
+
+      {/* Recording Status */}
+      <Text style={styles.status}>
+        {playerStatus.playing ? 'Playing...' : 'Paused'}
+      </Text>
+
+      {/* Resume Recording Button */}
+      <TouchableOpacity 
+        style={styles.resumeButton}
+        onPress={handleResumeRecording}
+      >
+        <Ionicons name="mic" size={40} color="#fff" />
       </TouchableOpacity>
-      <TouchableOpacity style={styles.resumeButton}>
-        <Ionicons name="play" size={40} color="#fff" />
-      </TouchableOpacity>
-      {/* Action buttons */}
-      <View style={styles.actionRow}>
-        <TouchableOpacity style={styles.actionItem}>
-          <Ionicons name="trash-outline" size={26} color="#00AEEF" />
-          <Text style={styles.actionText}>Discard</Text>
-        </TouchableOpacity>
+      <Text style={styles.resumeText}>
+        Tap to Resume Recording
+      </Text>
 
-        <TouchableOpacity style={styles.actionItem}>
-          <Ionicons name="arrow-up" size={26} color="#00AEEF" />
-          <Text style={styles.actionText}>Send</Text>
-        </TouchableOpacity>
+      {/* Action Buttons */}
+      <ActionButtons
+        onDiscard={handleDiscard}
+        onSend={handleSend}
+        onDraft={handleDraft}
+        onUpload={openUploadModal}
+      />
 
-        <TouchableOpacity style={styles.actionItem}>
-          <Ionicons name="copy-outline" size={26} color="#00AEEF" />
-          <Text style={styles.actionText}>Draft</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.actionItem}
-          onPress={() => setUploadModalVisible(true)}
-        >
-          <Ionicons name="camera-outline" size={26} color="#00AEEF" />
-          <Text style={styles.actionText}>Upload</Text>
-        </TouchableOpacity>
-      </View>
       {/* Upload Modal */}
-      <Modal
+      <UploadModal
         visible={uploadModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setUploadModalVisible(false)}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalBox}>
-            <View style={styles.modalHeader}>
-              <Ionicons name="cloud-upload-outline" size={26} color="#999" />
-              <View style={{ marginLeft: 10 }}>
-                <Text style={styles.modalTitle}>Upload files</Text>
-                <Text style={styles.modalSubtitle}>
-                  Select and upload the files of your choice
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setUploadModalVisible(false)}
-                style={{ marginLeft: "auto" }}
-              >
-                <Ionicons name="close" size={28} color="#666" />
-              </TouchableOpacity>
-            </View>
+        onClose={closeUploadModal}
+        onTakePhoto={handleTakePhoto}
+        onChoosePhoto={handleChoosePhoto}
+      />
 
-            <View style={styles.divider} />
-
-            <View style={styles.uploadOptions}>
-              <TouchableOpacity
-                style={styles.uploadButton}
-                onPress={handleTakePhoto}
-              >
-                <Ionicons name="camera-outline" size={28} color="#333" />
-                <Text style={styles.uploadButtonText}>Take photo</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.uploadButton}
-                onPress={handleChoosePhoto}
-              >
-                <Ionicons name="image-outline" size={28} color="#333" />
-                <Text style={styles.uploadButtonText}>Choose photo</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
       {/* Floating Tabs */}
-      <FloatingTabs />/
+      <FloatingTabs />
     </View>
   );
 };
@@ -195,27 +166,31 @@ const styles = StyleSheet.create({
     paddingTop: 50,
     paddingBottom: 100,
   },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 24,
-    alignItems: "center",
+  noRecordingText: {
+    fontSize: 18,
+    color: "#666",
+    textAlign: "center",
+    marginTop: 100,
   },
-  title: { fontSize: 22, fontWeight: "bold", color: "#333" },
-  waveform: {
-    flexDirection: "row",
-    justifyContent: "center",
-    marginVertical: 20,
-    alignItems: "flex-end",
+  backButton: {
+    backgroundColor: "#00AEEF",
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 20,
+    alignSelf: "center",
+  },
+  backButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
   },
   playbackLabel: {
     textAlign: "center",
-    fontSize: 14,
-    color: "#777",
-  },
-  playbackTime: {
-    color: "#00AEEF",
+    fontSize: 16,
+    color: "#333",
     fontWeight: "600",
+    marginBottom: 20,
   },
   playButton: {
     backgroundColor: "#00AEEF",
@@ -227,35 +202,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  toggleWrapper: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    marginVertical: 16,
-  },
-  toggleLabel: { fontSize: 14, color: "#333", marginHorizontal: 8 },
-  toggleTrack: {
-    width: 50,
-    height: 8,
-    backgroundColor: "#ccc",
-    borderRadius: 4,
-    justifyContent: "center",
-  },
-  toggleThumb: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: "#00AEEF",
-    position: "absolute",
-    right: 0,
-  },
-  recordingTime: {
-    fontSize: 38,
-    color: "#00AEEF",
-    fontWeight: "bold",
-    textAlign: "center",
-    // marginTop: 3,
-  },
   status: {
     textAlign: "center",
     color: "#666",
@@ -263,10 +209,11 @@ const styles = StyleSheet.create({
     marginVertical: 8,
   },
   resumeText: {
-    color: "red",
+    color: "#00AEEF",
     textAlign: "center",
     fontSize: 14,
     marginTop: 8,
+    fontWeight: "600",
   },
   resumeButton: {
     backgroundColor: "#00AEEF",
@@ -276,64 +223,8 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     justifyContent: "center",
     alignItems: "center",
-    marginTop: 12,
+    marginTop: 24,
     borderWidth: 3,
-    borderColor: "#ccc",
-    marginBottom: 5,
-  },
-  actionRow: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    // marginTop: 30,
-    paddingHorizontal: 16,
-  },
-  actionItem: { alignItems: "center" },
-  actionText: { color: "#555", fontSize: 14, marginTop: 6 },
-  modalContainer: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
-    padding: 20,
-  },
-  modalBox: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 20,
-  },
-  modalHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#333",
-  },
-  modalSubtitle: {
-    fontSize: 14,
-    color: "#777",
-  },
-  divider: {
-    height: 1,
-    backgroundColor: "#ddd",
-    marginVertical: 16,
-  },
-  uploadOptions: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-  },
-  uploadButton: {
-    backgroundColor: "#F0F8FF",
-    paddingVertical: 20,
-    paddingHorizontal: 18,
-    borderRadius: 12,
-    alignItems: "center",
-    width: "45%",
-  },
-  uploadButtonText: {
-    marginTop: 10,
-    fontSize: 14,
-    color: "#333",
+    borderColor: "#E5E7EB",
   },
 });
